@@ -616,7 +616,9 @@ class VersionCommand extends Command {
     }
 
     if (this.commitAndTag) {
-      chain = chain.then(() => gitAdd(Array.from(changedFiles), this.gitOpts, this.execOpts));
+      for(const changedFile of changedFiles){
+        chain = chain.then(() => gitAdd([changedFile], this.gitOpts, this.execOpts));
+      }
     }
 
     return chain;

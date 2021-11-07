@@ -12,7 +12,7 @@ module.exports.gitCommit = gitCommit;
  * @param {{ amend: boolean; commitHooks: boolean; signGitCommit: boolean; }} gitOpts
  * @param {import("@lerna/child-process").ExecOpts} opts
  */
-function gitCommit(message, { amend, commitHooks, signGitCommit }, opts) {
+function gitCommit(message, { amend, commitHooks, signGitCommit, all }, opts) {
   log.silly("gitCommit", message);
   const args = ["commit"];
 
@@ -26,11 +26,16 @@ function gitCommit(message, { amend, commitHooks, signGitCommit }, opts) {
 
   if (amend) {
     args.push("--amend", "--no-edit");
-  } else if (message.indexOf(EOL) > -1) {
-    // Use tempfile to allow multi\nline strings.
-    args.push("-F", tempWrite.sync(message, "lerna-commit.txt"));
   } else {
-    args.push("-m", message);
+    if (message.indexOf(EOL) > -1) {
+      // Use tempfile to allow multi\nline strings.
+      args.push("-F", tempWrite.sync(message, "lerna-commit.txt"));
+    } else {
+      args.push("-m", message);
+    }
+    if(all) {
+      args.push("--all");
+    }
   }
 
   log.verbose("git", args);

@@ -52,6 +52,8 @@ class VersionCommand extends Command {
     );
   }
 
+  useGitSubModules = undefined;
+
   configureProperties() {
     super.configureProperties();
 
@@ -101,6 +103,42 @@ class VersionCommand extends Command {
     this.savePrefix = this.options.exact ? "" : "^";
   }
 
+  getBranch( execOpts) {
+    const currentBranch = getCurrentBranch(execOpts);
+
+    if (currentBranch === "HEAD") {
+      throw new ValidationError(
+        "ENOGIT",
+        "Detached git HEAD, please checkout a branch to choose versions."
+      );
+    }
+
+    if (this.pushToRemote && !remoteBranchExists(this.gitRemote, currentBranch, execOpts)) {
+      throw new ValidationError(
+        "ENOREMOTEBRANCH",
+        dedent`
+          Branch '${currentBranch}' doesn't exist in remote '${this.gitRemote}'.
+          If this is a new branch, please make sure you push it to the remote first.
+        `
+      );
+    }
+
+    if (
+      this.options.allowBranch &&
+      ![].concat(this.options.allowBranch).some((x) => minimatch(currentBranch, x))
+    ) {
+      throw new ValidationError(
+        "ENOTALLOWED",
+        dedent`
+          Branch '${currentBranch}' is restricted from versioning due to allowBranch config.
+          Please consider the reasons for this restriction before overriding the option.
+        `
+      );
+    }
+
+    return currentBranch;
+  }
+
   initialize() {
     if (!this.project.isIndependent()) {
       this.logger.info("current version", this.project.version);
@@ -115,37 +153,7 @@ class VersionCommand extends Command {
         );
       }
 
-      this.currentBranch = getCurrentBranch(this.execOpts);
-
-      if (this.currentBranch === "HEAD") {
-        throw new ValidationError(
-          "ENOGIT",
-          "Detached git HEAD, please checkout a branch to choose versions."
-        );
-      }
-
-      if (this.pushToRemote && !remoteBranchExists(this.gitRemote, this.currentBranch, this.execOpts)) {
-        throw new ValidationError(
-          "ENOREMOTEBRANCH",
-          dedent`
-            Branch '${this.currentBranch}' doesn't exist in remote '${this.gitRemote}'.
-            If this is a new branch, please make sure you push it to the remote first.
-          `
-        );
-      }
-
-      if (
-        this.options.allowBranch &&
-        ![].concat(this.options.allowBranch).some((x) => minimatch(this.currentBranch, x))
-      ) {
-        throw new ValidationError(
-          "ENOTALLOWED",
-          dedent`
-            Branch '${this.currentBranch}' is restricted from versioning due to allowBranch config.
-            Please consider the reasons for this restriction before overriding the option.
-          `
-        );
-      }
+      this.currentBranch = this.getBranch(this.execOpts);
 
       if (
         this.commitAndTag &&
@@ -237,8 +245,8 @@ class VersionCommand extends Command {
     // don't execute recursively if run from a poorly-named script
     this.runRootLifecycle = /^(pre|post)?version$/.test(process.env.npm_lifecycle_event)
       ? (stage) => {
-          this.logger.warn("lifecycle", "Skipping root %j because it has already been called", stage);
-        }
+        this.logger.warn("lifecycle", "Skipping root %j because it has already been called", stage);
+      }
       : (stage) => this.runPackageLifecycle(this.project.manifest, stage);
 
     const tasks = [
@@ -616,9 +624,14 @@ class VersionCommand extends Command {
     }
 
     if (this.commitAndTag) {
-      for(const changedFile of changedFiles){
-        chain = chain.then(() => gitAdd([changedFile], this.gitOpts, this.execOpts));
-      }
+      chain = chain
+        .then(
+          () =>
+            gitAdd(Array.from(changedFiles), this.gitOpts, this.execOpts)
+              .then(
+                useGitSubModules => this.useGitSubModules = useGitSubModules
+              )
+        );
     }
 
     return chain;
@@ -651,14 +664,41 @@ class VersionCommand extends Command {
   }
 
   gitCommitAndTagVersionForUpdates() {
-    const tags = this.packagesToVersion.map((pkg) => `${pkg.name}@${this.updatesVersions.get(pkg.name)}`);
     const subject = this.options.message || "Publish";
-    const message = tags.reduce((msg, tag) => `${msg}${os.EOL} - ${tag}`, `${subject}${os.EOL}`);
 
-    return Promise.resolve()
-      .then(() => gitCommit(message, this.gitOpts, this.execOpts))
-      .then(() => Promise.all(tags.map((tag) => gitTag(tag, this.gitOpts, this.execOpts))))
-      .then(() => tags);
+    if (this.useGitSubModules) {
+      const modulesCommits = [];
+      const tags = [];
+      for (const modulePackage of this.packagesToVersion) {
+        const tag = `${modulePackage.name}@${this.updatesVersions.get(modulePackage.name)}`;
+        const message = `${subject} - ${tag}`;
+        const execOpts = { ...this.execOpts, cwd: modulePackage.location };
+        const promise = Promise.resolve()
+          .then(() => gitCommit(message, this.gitOpts, execOpts))
+          .then(() => gitTag(tag, this.gitOpts, execOpts))
+          .then(() => tag);
+
+        tags.push(tag);
+        modulesCommits.push(promise);
+      }
+      const rootMessage = tags.reduce(
+        (msg, tag) => `${msg}${os.EOL} - ${tag}`,
+        `${subject}${os.EOL}`
+      );
+
+      return Promise.all(modulesCommits)
+        .then(() => gitCommit(rootMessage, {...this.gitOpts, all: true}, this.execOpts))
+        .then(() => Promise.all(tags.map((tag) => gitTag(tag, this.gitOpts, this.execOpts))))
+        .then(() => tags);
+    } else {
+      const tags = this.packagesToVersion.map((pkg) => `${pkg.name}@${this.updatesVersions.get(pkg.name)}`);
+      const message = tags.reduce((msg, tag) => `${msg}${os.EOL} - ${tag}`, `${subject}${os.EOL}`);
+
+      return Promise.resolve()
+        .then(() => gitCommit(message, this.gitOpts, this.execOpts))
+        .then(() => Promise.all(tags.map((tag) => gitTag(tag, this.gitOpts, this.execOpts))))
+        .then(() => tags);
+    }
   }
 
   gitCommitAndTagVersion() {
@@ -676,8 +716,22 @@ class VersionCommand extends Command {
 
   gitPushToRemote() {
     this.logger.info("git", "Pushing tags...");
+    if (this.useGitSubModules) {
+      const promises = [];
 
-    return gitPush(this.gitRemote, this.currentBranch, this.execOpts);
+      for (const modulePackage of this.packagesToVersion) {
+        const execOpts = { ...this.execOpts, cwd: modulePackage.location };
+        const currentBranch = this.getBranch(execOpts);        
+        const promise = Promise.resolve()
+          .then(() => gitPush(this.gitRemote, currentBranch, execOpts) );
+
+        promises.push(promise);
+      }
+      return Promise.all(promises)
+        .then( () => gitPush(this.gitRemote, this.currentBranch, this.execOpts));
+    } else {
+      return gitPush(this.gitRemote, this.currentBranch, this.execOpts);
+    }
   }
 }
 

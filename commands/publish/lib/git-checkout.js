@@ -18,14 +18,12 @@ function gitCheckout(stagedFiles, gitOpts, execOpts) {
 
   try {
     if (fs.existsSync( path.resolve(execOpts.cwd, '.gitmodules') )) {
-      console.log("Checking out one-by-one for sub modules");
       log.silly("gitCheckout sub modules", files);
       const addProcesses = [];
 
       for(const file of files) {
         const directory = path.resolve( execOpts.cwd, path.dirname(file) );
         const filename = path.basename(file);
-        directories.add(directory);
 
         addProcesses.push( 
           childProcess.exec("git", ["checkout", "--", filename], { ...execOpts, cwd: directory } )
@@ -34,7 +32,6 @@ function gitCheckout(stagedFiles, gitOpts, execOpts) {
 
       return Promise.all(addProcesses);
     } else {
-      console.log("Checking out at once");
       log.silly("gitCheckout", files);
       return childProcess.exec("git", ["checkout", "--", ...files], execOpts);
     }

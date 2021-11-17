@@ -93,6 +93,19 @@ class PublishCommand extends Command {
     return `lerna/${this.options.lernaVersion}/node@${process.version}+${process.arch} (${process.platform})`;
   }
 
+  getNpmConf(packagePrefix) {
+    return npmConf({
+      lernaCommand: "publish",
+      _auth: this.options.legacyAuth,
+      npmSession: this.npmSession,
+      npmVersion: this.userAgent,
+      otp: this.options.otp,
+      registry: this.options.registry,
+      "ignore-prepublish": this.options.ignorePrepublish,
+      "ignore-scripts": this.options.ignoreScripts,
+    }, packagePrefix);
+  }
+
   initialize() {
     if (this.options.skipNpm) {
       // TODO: remove in next major release
@@ -113,16 +126,7 @@ class PublishCommand extends Command {
     this.logger.verbose("session", this.npmSession);
     this.logger.verbose("user-agent", this.userAgent);
 
-    this.conf = npmConf({
-      lernaCommand: "publish",
-      _auth: this.options.legacyAuth,
-      npmSession: this.npmSession,
-      npmVersion: this.userAgent,
-      otp: this.options.otp,
-      registry: this.options.registry,
-      "ignore-prepublish": this.options.ignorePrepublish,
-      "ignore-scripts": this.options.ignoreScripts,
-    });
+    this.conf = this.getNpmConf();
 
     // cache to hold a one-time-password across publishes
     this.otpCache = { otp: this.conf.get("otp") };
@@ -705,7 +709,9 @@ class PublishCommand extends Command {
         (pkg) => {
           const preDistTag = this.getPreDistTag(pkg);
           const tag = !this.options.tempTag && preDistTag ? preDistTag : opts.tag;
-          const pkgOpts = Object.assign({}, opts, { tag });
+
+          const packageConf = this.getNpmConf(pkg.location);
+          const pkgOpts = Object.assign({}, opts, packageConf.snapshot, { tag });
 
           return pulseTillDone(npmPublish(pkg, pkg.packed.tarFilePath, pkgOpts, this.otpCache)).then(() => {
             tracker.success("published", pkg.name, pkg.version);

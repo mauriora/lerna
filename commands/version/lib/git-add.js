@@ -24,8 +24,7 @@ function gitAdd(changedFiles, gitOpts, execOpts) {
 
   try {
     if (fs.existsSync( path.resolve(execOpts.cwd, '.gitmodules') )) {
-      console.log("Adding one-by-one for sub modules");
-      log.silly("gitAdd", files);
+      log.silly("gitAdd sub modules", files);
       const addProcesses = [];
 
       for(const file of files) {
@@ -40,7 +39,6 @@ function gitAdd(changedFiles, gitOpts, execOpts) {
 
       return Promise.all(addProcesses).then( () => true );
     } else {
-      console.log("Adding at once");
       log.silly("gitAdd", files);
       return childProcess.exec("git", ["add", "--", ...files], execOpts).then( () => false );
     }

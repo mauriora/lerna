@@ -711,7 +711,11 @@ class PublishCommand extends Command {
           const tag = !this.options.tempTag && preDistTag ? preDistTag : opts.tag;
 
           const packageConf = this.getNpmConf(pkg.location);
-          const pkgOpts = Object.assign({}, opts, packageConf.snapshot, { tag });
+          const dryRun = undefined === packageConf?.snapshot?.['dry-run'] ?
+            {} 
+            : { 'dry-run': packageConf.snapshot['dry-run'] };
+
+          const pkgOpts = Object.assign({}, opts, { tag }, dryRun);
 
           return pulseTillDone(npmPublish(pkg, pkg.packed.tarFilePath, pkgOpts, this.otpCache)).then(() => {
             tracker.success("published", pkg.name, pkg.version);
